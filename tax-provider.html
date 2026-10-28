@@ -123,6 +123,13 @@
           </span>
         </div>
 
+        <!-- 黄底提示 -->
+        <div style="background:#fdf6ec;border:1px solid #faecd8;color:#c6944a;padding:10px 14px;border-radius:4px;font-size:12.5px;line-height:1.7;margin-bottom:14px;">
+          <b style="margin-right:4px;">流程说明：</b>
+          财务点击「上传个税申报」按钮 → 下载模版 → 录入信息后上传 → 上传成功后后端会按企业为单位进行拆分。<br>
+          如果拆分时数据对应不上则上传失败，后端返回对应不上的人员数据，前端会弹出异常弹窗，填充所有异常数据。财务需核对修正后重新上传。
+        </div>
+
         <!-- 数据表格 -->
         <table>
           <colgroup>
@@ -281,6 +288,40 @@
   </div>
 </div>
 
+<!-- ============ 上传失败异常弹窗（不能点遮罩关闭，必须手动处理） ============ -->
+<div class="modal-mask" id="errorMask">
+  <div class="modal-box" style="width:640px;">
+    <div class="modal-header" style="color:#f56c6c;">
+      <span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        上传失败 · 数据异常
+      </span>
+    </div>
+    <div class="modal-body" style="padding:16px 24px 6px;">
+      <div style="color:#606266;font-size:13px;margin-bottom:12px;">
+        后端按企业拆分时发现以下 <b style="color:#f56c6c;" id="errCount">0</b> 条人员数据对应不上，请核对修正后重新上传。<br>
+        <span style="color:#909399;font-size:12px;">（本弹窗需关闭后才能重新操作）</span>
+      </div>
+      <div style="max-height:280px;overflow-y:auto;border:1px solid #ebeef5;border-radius:4px;">
+        <table id="errTable" style="width:100%;border-collapse:collapse;font-size:12.5px;">
+          <thead style="background:#f5f7fa;position:sticky;top:0;">
+            <tr style="color:#606266;">
+              <th style="padding:8px 10px;text-align:left;font-weight:500;border-bottom:1px solid #ebeef5;">序号</th>
+              <th style="padding:8px 10px;text-align:left;font-weight:500;border-bottom:1px solid #ebeef5;">姓名</th>
+              <th style="padding:8px 10px;text-align:left;font-weight:500;border-bottom:1px solid #ebeef5;">身份证号</th>
+              <th style="padding:8px 10px;text-align:left;font-weight:500;border-bottom:1px solid #ebeef5;">异常原因</th>
+            </tr>
+          </thead>
+          <tbody id="errBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span class="modal-btn ok" id="errorClose">关闭（核对后重新上传）</span>
+    </div>
+  </div>
+</div>
+
 <!-- 轻提示 -->
 <div class="toast" id="toast">
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2faf44" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12.3 L11 15.3 L16.5 9.6"/></svg>
@@ -332,14 +373,58 @@
     }
   });
 
-  // 确定：校验三项必填，通过后提示上传成功（纯前端演示）
+  // 模拟后端拆分返回的异常数据
+  var MOCK_ERRORS = [
+    { name: '张三', idCard: '3301031990****1234', reason: '身份证号与企业档案不匹配' },
+    { name: '李四', idCard: '3301051988****5678', reason: '服务商未归属该企业' },
+    { name: '王五', idCard: '3301061992****9012', reason: '该人员本月已申报' },
+    { name: '赵六', idCard: '3301021985****3456', reason: '企业名称录入有误' },
+    { name: '钱七', idCard: '3301081991****7890', reason: '身份证号位数不正确' },
+    { name: '孙八', idCard: '3301091987****2345', reason: '与上月申报记录重复' },
+  ];
+
+  var errorMask = document.getElementById('errorMask');
+  var errBody = document.getElementById('errBody');
+
+  function openErrorMask(errList) {
+    document.getElementById('errCount').textContent = errList.length;
+    errBody.innerHTML = '';
+    errList.forEach(function (r, i) {
+      var tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid #ebeef5';
+      tr.innerHTML = '<td style="padding:8px 10px;">' + (i + 1) + '</td>'
+                  + '<td style="padding:8px 10px;">' + r.name + '</td>'
+                  + '<td style="padding:8px 10px;font-family:Consolas,monospace;">' + r.idCard + '</td>'
+                  + '<td style="padding:8px 10px;color:#f56c6c;">' + r.reason + '</td>';
+      errBody.appendChild(tr);
+    });
+    errorMask.classList.add('show');
+  }
+
+  // 异常弹窗：不能点遮罩关闭，必须手动点按钮
+  document.getElementById('errorClose').addEventListener('click', function () {
+    errorMask.classList.remove('show');
+  });
+
+  // 确定：校验 → 模拟后端拆分 → 返回异常数据 / 成功
   document.getElementById('uploadOk').addEventListener('click', function () {
     if (!period.value) { showToast('请选择税款所属期', true); return; }
     if (!provider.value) { showToast('请选择服务商名称', true); return; }
     if (!fileInput.files || !fileInput.files[0]) { showToast('请上传模板文件', true); return; }
+
     closeMask();
     resetForm();
-    showToast('上传成功');
+
+    // 模拟后端：约 60% 概率命中异常，演示异常弹窗；全部命中失败是为了展示完整流程
+    var hitError = Math.random() < 1.0;
+    if (hitError) {
+      // 随机抽 2-5 条异常数据
+      var n = 2 + Math.floor(Math.random() * 4);
+      var picks = MOCK_ERRORS.slice(0, n);
+      setTimeout(function () { openErrorMask(picks); }, 300);
+    } else {
+      showToast('上传成功，后端正在按企业拆分...');
+    }
   });
 })();
 </script>
